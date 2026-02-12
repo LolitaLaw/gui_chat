@@ -1,3 +1,4 @@
+# main.py
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 import sys
@@ -24,7 +25,6 @@ class UltimateChat:
 
         self.displayed_contacts = CONTACTS[:]
         self.target_addr = ("127.0.0.1", PORT)
-        # self.target_name = "Loopback"
         self.target_name = None  # 初始无选中联系人
 
         # Python 解释器状态
@@ -44,7 +44,6 @@ class UltimateChat:
         self.switch_mode("cmd")
         self.set_app_window()
 
-    # 强制显示任务栏图标 (Windows API)
     def set_app_window(self):
         GWL_EXSTYLE = -20
         WS_EX_APPWINDOW = 0x00040000
@@ -56,8 +55,6 @@ class UltimateChat:
             style = style & ~WS_EX_TOOLWINDOW
             style = style | WS_EX_APPWINDOW
             windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-
-            # 重新刷新窗口状态以生效
             self.root.wm_withdraw()
             self.root.after(10, lambda: self.root.wm_deiconify())
         except Exception as e:
@@ -75,7 +72,6 @@ class UltimateChat:
         if self.current_view:
             self.current_view.destroy()
 
-        # 切换模式时，同时切换图标
         self._update_app_icon(mode)
 
         if mode == "cmd":
@@ -89,40 +85,40 @@ class UltimateChat:
             self.root.overrideredirect(False)
             self.root.title(THEMES["normal"]["title"])
             self.root.configure(bg=THEMES["normal"]["bg_root"])
-            self.current_view = NormalView(self.root, self)
+            # 传递 is_dark_mode 给 NormalView
+            self.current_view = NormalView(self.root, self, self.is_dark_mode)
 
         elif mode == "wps":
             self.root.overrideredirect(True)
-            self.root.configure(bg=THEMES["wps"]["bg_root"])
-            self.current_view = WpsView(self.root, self)
-            # 切换到 WPS 模式后强制刷新窗口状态
+
+            # [关键修复] 获取正确的 WPS 主题配置
+            scheme_key = "dark" if self.is_dark_mode else "light"
+            wps_bg = THEMES["wps"][scheme_key]["bg_root"]
+
+            self.root.configure(bg=wps_bg)
+
+            # 传递 is_dark_mode 给 WpsView
+            self.current_view = WpsView(self.root, self, self.is_dark_mode)
             self.root.after(10, self.set_app_window)
 
         self.current_view.pack(fill="both", expand=True)
 
-    # 图标更新方法
     def _update_app_icon(self, mode):
         icon_path = ICONS.get(mode)
-        # 检查文件是否存在
         if icon_path and os.path.exists(icon_path):
             try:
-                # 如果是 .ico 文件 (Windows 原生图标)
                 if icon_path.endswith(".ico"):
                     self.root.iconbitmap(icon_path)
-                # 如果是 .png/.gif 文件
                 else:
                     img = tk.PhotoImage(file=icon_path)
                     self.root.iconphoto(True, img)
             except Exception as e:
                 print(f"Load icon failed: {e}")
 
-    # ==== 主题切换 ====
     def toggle_color_scheme(self):
         self.is_dark_mode = not self.is_dark_mode
-        # 重新加载当前视图以应用新主题
         self.switch_mode(self.current_mode)
 
-    # ==== 联系人管理 ====
     def set_target(self, contact):
         self.target_addr = (contact["ip"], contact["port"])
         self.target_name = contact["name"]
@@ -140,9 +136,7 @@ class UltimateChat:
                 }
             )
 
-    # 修改联系人
     def modify_contact(self):
-        # 获取当前选中的联系人索引
         if not hasattr(self.current_view, "contact_list"):
             return
         try:
@@ -154,8 +148,6 @@ class UltimateChat:
             )
             if new_name:
                 contact["name"] = new_name
-                # 更新所有联系人列表引用 (这里简化，直接修改原列表)
-                # 实际应用中建议通过 ID 查找
                 for c in CONTACTS:
                     if c["id"] == contact["id"]:
                         c["name"] = new_name
@@ -163,7 +155,6 @@ class UltimateChat:
         except IndexError:
             pass
 
-    # 删除联系人
     def delete_contact(self):
         if not hasattr(self.current_view, "contact_list"):
             return
@@ -177,7 +168,6 @@ class UltimateChat:
                         self.current_view.reset_chat_area()
 
                 self.displayed_contacts.pop(idx)
-                # 同步删除 CONTACTS 全局列表
                 for i, c in enumerate(CONTACTS):
                     if c["id"] == contact["id"]:
                         CONTACTS.pop(i)
@@ -186,7 +176,6 @@ class UltimateChat:
         except IndexError:
             pass
 
-    # 实现联系人搜索过滤逻辑
     def filter_contacts(self, query):
         query = query.lower().strip()
         if not query:
@@ -196,22 +185,18 @@ class UltimateChat:
                 c for c in CONTACTS if query in c["name"].lower() or query in c["ip"]
             ]
 
-        # # 如果当前是正常模式，刷新列表
-        # if isinstance(self.current_view, NormalView):
-        #     self.current_view.refresh_contacts()
         if hasattr(self.current_view, "refresh_contacts"):
             self.current_view.refresh_contacts()
 
-    # --- 消息处理 ---
     def on_message_received(self, msg, ip):
         self.root.after(0, lambda: self._distribute_msg(msg, ip))
 
     def _distribute_msg(self, msg, ip):
         name = next((c["name"] for c in CONTACTS if c["ip"] == ip), ip)
-        time_str = datetime.now().strftime("%H:%M")  # 获取当前时间
+        time_str = datetime.now().strftime("%H:%M")
+
         if self.current_mode == "cmd":
             self.current_view.log(f"Reply from {ip}: {msg}", "cmd_text")
-            # 消息插入后，必须重新补一个提示符，因为看起来像是终端被打断了
             if self.in_python_mode:
                 self._log_to_cmd_view(">>> ", no_newline=True)
             else:
@@ -226,20 +211,14 @@ class UltimateChat:
         if not msg:
             return
         self.network.send(msg, self.target_addr)
-        time_str = datetime.now().strftime("%H:%M")  # 获取发送时间
+        time_str = datetime.now().strftime("%H:%M")
 
         if self.current_mode == "normal":
-            # 正常模式显示自己的时间
             self.current_view.log(f"{msg} :[{time_str}]\n", tag_self)
         else:
             self.current_view.log(f"{msg}\n", tag_self)
 
-    # --- CMD 专属逻辑 ---
     def handle_cmd_input(self, msg):
-        # 1. 移除之前的 self._log_to_cmd_view(f"{msg}\n") 回显
-        # 因为现在 View 层已经直接在 Text 控件里显示用户打的字了
-
-        # Python 模式
         if not self.in_python_mode and msg.lower() == "python":
             self.in_python_mode = True
             self._log_to_cmd_view(f"Python {sys.version.split()[0]} on win32\n")
@@ -264,7 +243,6 @@ class UltimateChat:
                 sys.stdout = old_out
             return
 
-        # Windows 命令
         if msg.lower().startswith("cd "):
             try:
                 os.chdir(msg[3:].strip())
@@ -274,7 +252,6 @@ class UltimateChat:
         elif msg.lower() in ["cls", "clear"]:
             self.current_view.clear()
         else:
-            # 简单判断是否是系统命令
             whitelist = ["dir", "ipconfig", "ping", "ver", "whoami", "echo"]
             if msg.split()[0].lower() in whitelist:
                 try:
@@ -288,9 +265,7 @@ class UltimateChat:
                 except Exception as e:
                     self._log_to_cmd_view(str(e) + "\n", "cmd_err")
             else:
-                # 不是命令，当作聊天发送
                 self.network.send(msg, self.target_addr)
-                # self.handle_chat_send(msg, "cmd_text")# 复用发送逻辑
 
         self._log_to_cmd_view(f"{self.current_path}>", no_newline=True)
 

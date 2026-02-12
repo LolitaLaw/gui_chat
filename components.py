@@ -2,9 +2,7 @@
 # (基建层)：存放通用的 UI 组件（如智能滚动条）和工具类（如重定向器）
 
 import tkinter as tk
-import so
-
-de
+import socket
 from ctypes import windll, c_int, byref, sizeof
 
 
@@ -147,10 +145,6 @@ class SmartScrollbar(tk.Canvas):
         if not self.is_dragging:
             self.itemconfig(
                 "thumb",
-                state="hidden" if self.auto_hide else "normal",
-                fill=self.thumb_color,
-            )
-               "thumb",
                 state="hidden" if self.auto_hide else "normal",
                 fill=self.thumb_color,
             )
