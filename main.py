@@ -46,6 +46,7 @@ class UltimateChat:
             sys.exit(1)
 
         self.setup_window()
+        # self.switch_mode("normal")
         self.switch_mode("cmd")
         self.set_app_window()
 
@@ -137,6 +138,7 @@ class UltimateChat:
         self.target_ip = contact["ip"]
         # 切换联系人时，加载该人的历史记录
         self.load_history_to_view()
+
     def load_history_to_view(self):
         # 将内存中的聊天记录渲染到当前视图
         # 如果没有选中联系人，且在 Normal 模式，显示空状态
@@ -172,9 +174,7 @@ class UltimateChat:
             idx = self.current_view.contact_list.curselection()[0]
             contact = self.displayed_contacts[idx]
 
-            new_name = simpledialog.askstring(
-                "修改备注", "输入新名称:", initialvalue=contact["name"]
-            )
+            new_name = simpledialog.askstring("修改备注", "输入新名称:", initialvalue=contact["name"])
             if new_name:
                 contact["name"] = new_name
                 for c in CONTACTS:
@@ -213,9 +213,7 @@ class UltimateChat:
         if not query:
             self.displayed_contacts = CONTACTS[:]
         else:
-            self.displayed_contacts = [
-                c for c in CONTACTS if query in c["name"].lower() or query in c["ip"]
-            ]
+            self.displayed_contacts = [c for c in CONTACTS if query in c["name"].lower() or query in c["ip"]]
 
         if hasattr(self.current_view, "refresh_contacts"):
             self.current_view.refresh_contacts()
@@ -258,7 +256,7 @@ class UltimateChat:
     def handle_chat_send(self, msg, tag_self):
         if not msg or not self.target_addr:
             return
-        self.network.send(msg, self.target_addr)# 先发后存，确保网络异常时不丢记录
+        self.network.send(msg, self.target_addr)  # 先发后存，确保网络异常时不丢记录
         # 存入历史记录
         target_ip = self.target_addr[0]
         if target_ip not in self.chat_history:
@@ -276,7 +274,7 @@ class UltimateChat:
         else:
             self.current_view.log(f"{msg}\n", tag_self)
         """
-    
+
     def handle_cmd_input(self, msg):
         if not self.in_python_mode and msg.lower() == "python":
             self.in_python_mode = True
@@ -293,9 +291,7 @@ class UltimateChat:
             try:
                 sys.stdout = self.redirector
                 is_incomplete = self.console.push(msg)
-                self._log_to_cmd_view(
-                    "... " if is_incomplete else ">>> ", no_newline=True
-                )
+                self._log_to_cmd_view("... " if is_incomplete else ">>> ", no_newline=True)
             except Exception as e:
                 self._log_to_cmd_view(str(e) + "\n>>> ", "cmd_err", no_newline=True)
             finally:
@@ -314,9 +310,7 @@ class UltimateChat:
             whitelist = ["dir", "ipconfig", "ping", "ver", "whoami", "echo"]
             if msg.split()[0].lower() in whitelist:
                 try:
-                    res = subprocess.run(
-                        msg, shell=True, capture_output=True, text=True, encoding="gbk"
-                    )
+                    res = subprocess.run(msg, shell=True, capture_output=True, text=True, encoding="gbk")
                     if res.stdout:
                         self._log_to_cmd_view(res.stdout)
                     if res.stderr:

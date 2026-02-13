@@ -62,27 +62,14 @@ class StdoutRedirector:
 class SmartScrollbar(tk.Canvas):
     """自定义美化滚动条 (优化版)"""
 
-    def __init__(
-        self,
-        master,
-        command=None,
-        bg_color="#1e1e1e",
-        thumb_color="#4d4d4d",
-        hover_color="#6b6b6b",
-        width=10,
-        **kwargs
-    ):
+    def __init__(self, master, command=None, bg_color="#1e1e1e", thumb_color="#4d4d4d", hover_color="#6b6b6b", width=10, **kwargs):
         # width 参数控制滚动条宽度，默认 10px 更精致
-        super().__init__(
-            master, highlightthickness=0, bd=0, bg=bg_color, width=width, **kwargs
-        )
+        super().__init__(master, highlightthickness=0, bd=0, bg=bg_color, width=width, **kwargs)
         self.command = command
         self.thumb_color = thumb_color
         self.hover_color = hover_color
         self.auto_hide = True
-        self.thumb = self.create_rectangle(
-            0, 0, 0, 0, outline="", fill=self.thumb_color, tags="thumb"
-        )
+        self.thumb = self.create_rectangle(0, 0, 0, 0, outline="", fill=self.thumb_color, tags="thumb")
         self.is_hovering = False
         self.is_dragging = False
         self.current_lo = 0.0
@@ -128,9 +115,7 @@ class SmartScrollbar(tk.Canvas):
 
     def on_drag(self, e):
         if self.is_dragging and self.winfo_height() > 0 and self.command:
-            self.command(
-                "moveto", self.start_lo + (e.y - self.start_y) / self.winfo_height()
-            )
+            self.command("moveto", self.start_lo + (e.y - self.start_y) / self.winfo_height())
 
     def on_release(self, e):
         self.is_dragging = False

@@ -74,6 +74,13 @@ class CmdView(tk.Frame):
     def reset_chat_area(self):
         self.clear()
 
+    # 增加 append_msg 方法以兼容 main.py 的调用
+    def append_msg(self, record, sender_name):
+        log_text = f"Reply from {sender_name}: bytes={len(record['msg'])} time={record['time']} data={record['msg']}"
+        self.log(log_text, "cmd_text")
+        # 补一个提示符
+        self.log(f"{self.controller.current_path}>", "cmd_text", True)
+
 
 # === Normal 视图 ===
 class NormalView(tk.Frame):
@@ -82,31 +89,28 @@ class NormalView(tk.Frame):
         super().__init__(master, bg=self.colors["bg_root"])
         self.controller = controller
 
+        # 发送模式变量，默认 Enter 发送
+        self.send_mode_var = tk.StringVar(value="Enter")
+
         self.master.update_idletasks()
         if is_dark:
             WindowsTitleBarFix.apply_dark_title_bar(self.master)
         else:
             WindowsTitleBarFix.apply_light_title_bar(self.master)
 
-        paned = tk.PanedWindow(
-            self, orient="horizontal", bg=self.colors["bg_sidebar"], sashwidth=1
-        )
+        paned = tk.PanedWindow(self, orient="horizontal", bg=self.colors["bg_sidebar"], sashwidth=1)
         paned.pack(fill="both", expand=True)
 
-        # --- 左侧联系人 ---
-        sidebar = tk.Frame(paned, width=220, bg=self.colors["bg_sidebar"])
+        # --- 左侧联系人：宽度调整为 280 (原220)，从而让右侧看起来更窄 ---
+        sidebar = tk.Frame(paned, width=150, bg=self.colors["bg_sidebar"])
         paned.add(sidebar)
 
         # 搜索框区域
-        search_frm = tk.Frame(
-            sidebar, bg="#262626" if is_dark else "#e0e0e0", height=40
-        )
+        search_frm = tk.Frame(sidebar, bg="#262626" if is_dark else "#e0e0e0", height=40)
         search_frm.pack(fill="x", padx=10, pady=10)
 
         self.search_var = tk.StringVar()
-        self.search_var.trace(
-            "w", lambda *a: self.controller.filter_contacts(self.search_var.get())
-        )
+        self.search_var.trace("w", lambda *a: self.controller.filter_contacts(self.search_var.get()))
 
         tk.Entry(
             search_frm,
@@ -138,16 +142,20 @@ class NormalView(tk.Frame):
         ).pack(side="right")
 
         # 联系人列表
+        contact_font = ("Microsoft YaHei UI", 14)
         self.contact_list = tk.Listbox(
             sidebar,
             bg=self.colors["bg_sidebar"],
             fg=self.colors["fg_primary"],
             bd=0,
-            font=THEMES["normal"]["font_main"],
+            # font=THEMES["normal"]["font_main"],
+            font=contact_font,
             selectbackground=self.colors["bg_select"],
             selectforeground=self.colors["fg_primary"],
+            activestyle="none",  # 去掉选中时的
+            highlightthickness=0,  # 去掉选中时的
         )
-        self.contact_list.pack(fill="both", expand=True)
+        self.contact_list.pack(fill="both", expand=True, padx=5, pady=5)
         self.contact_list.bind("<<ListboxSelect>>", self._on_contact_select)
 
         self.contact_list.bind("<Button-3>", self._show_context_menu)
@@ -157,15 +165,17 @@ class NormalView(tk.Frame):
 
         self.refresh_contacts()
 
-        # --- 右侧聊天 ---
-        self.main_chat = tk.Frame(paned, bg=self.colors["bg_root"])
-        paned.add(self.main_chat)
+        # --- [关键修复] 右侧容器 ---
+        # 必须先创建 right_container，再把 main_chat 和 empty_frame 放进去
+        self.right_container = tk.Frame(paned, bg=self.colors["bg_root"])
+        paned.add(self.right_container)
 
         # 1. 空状态页面
         self.empty_frame = tk.Frame(self.right_container, bg=self.colors["bg_root"])
         tk.Label(
             self.empty_frame,
-            text="未选择联系人",
+            # text="未选择联系人",
+            text="",
             bg=self.colors["bg_root"],
             fg=self.colors["fg_primary"],
             font=("微软雅黑", 14),
@@ -226,10 +236,73 @@ class NormalView(tk.Frame):
         self.text_area.config(yscrollcommand=sb.set)
 
         # 输入区
-        input_frm = tk.Frame(self.main_chat, height=120, bg=self.colors["bg_root"])
+        input_frm = tk.Frame(self.main_chat, height=140, bg=self.colors["bg_root"])
         input_frm.pack(fill="x", side="bottom")
-        tk.Frame(input_frm, height=1, bg=self.colors["border"]).pack(fill="x")
+        input_frm.pack_propagate(False)  # 防止内部组件改变了 input_frm 的高度
+        # 顶部分割线
+        # tk.Frame(input_frm, height=1, bg=self.colors["border"]).pack(fill="x")
+        tk.Frame(input_frm, height=1, bg=self.colors["border"]).pack(fill="x", side="top")
 
+        input_inner = tk.Frame(input_frm, bg=self.colors["bg_root"])
+        input_inner.pack(fill="both", expand=True, padx=15, pady=15)
+        # =========== 组合发送按钮和模式选择框 ===========
+        send_bg = "#e9e9e9"# 统一背景色
+        self.send_composite = tk.Frame(input_inner, bg=send_bg)  
+        self.send_composite.pack(side="right", anchor="center", padx=(5, 15))
+
+        # 发送按钮
+        tk.Button(
+            self.send_composite,
+            text="发送(S)",
+            bg="#e9e9e9",
+            fg="black",
+            bd=0,
+            font=("微软雅黑", 9),
+            padx=8,
+            pady=5,
+            cursor="hand2",
+            command=self._send_msg_action,
+        ).pack(side="left", fill="y")
+
+        # 分割线 (视觉分割)
+        tk.Frame(self.send_composite, width=1, bg="#ccc").pack(side="left", fill="y", pady=5)
+
+        # === 极简下拉框 (仅显示箭头) ===
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        # 定义核心 Layout：移除 Textarea，只保留 Downarrow 并铺满
+        style.layout("ArrowOnly.TCombobox", [("Combobox.downarrow", {"sticky": "nswe"})])
+        # 配置样式：去除边框，背景色与 Frame 一致
+        style.configure("ArrowOnly.TCombobox", background=send_bg, bordercolor=send_bg, darkcolor=send_bg, lightcolor=send_bg, arrowsize=12)
+        # 鼠标悬停变色效果
+        style.map("ArrowOnly.TCombobox", background=[("active", "#d0d0d0")], arrowcolor=[("active", "black")])
+
+        # width=0 配合 ArrowOnly layout，只会显示箭头按钮的宽度
+        self.cb_send_mode = ttk.Combobox(
+            self.send_composite,
+            textvariable=self.send_mode_var,
+            values=["Enter", "Ctrl+Enter"],
+            state="readonly",
+            width=0,
+            style="ArrowOnly.TCombobox",
+        )
+        self.cb_send_mode.pack(side="left", fill="y")
+        # 绑定点击事件，动态调整下拉列表宽度
+        self.cb_send_mode.bind("<Button-1>", self._update_combo_popdown)
+        self.input_area = tk.Text(
+            input_inner,
+            height=1,
+            bg=self.colors["bg_input"],
+            fg=self.colors["fg_primary"],
+            font=THEMES["normal"]["font_main"],
+            bd=0,
+            insertbackground=self.colors["fg_primary"],
+        )
+        self.input_area.pack(side="left", fill="both", expand=True)
+        self.input_area.bind("<Return>", self._on_return)
+        """
+        # 文本输入框
         self.input_area = tk.Text(
             input_frm,
             height=5,
@@ -241,10 +314,25 @@ class NormalView(tk.Frame):
             padx=10,
             pady=5,
         )
-        self.input_area.pack(fill="both", expand=True)
+        self.input_area.pack(side="top", fill="both", expand=True)
         self.input_area.bind("<Return>", self._on_return)
+        """
         # 初始显示空状态
         self.toggle_empty_state(True)
+
+    # --- 动态计算并设置下拉列表宽度 ---
+    def _update_combo_popdown(self, event):
+        # 1. 获取父容器（组合键整体）宽度
+        parent_width = self.send_composite.winfo_width()
+        # 2. 获取下拉箭头自身宽度
+        my_width = self.cb_send_mode.winfo_width()
+        # 3. 计算偏移量 (向左偏移，使列表左边缘与父容器对齐)
+        x_offset = -(parent_width - my_width)
+
+        # 4. 配置 postoffset = (x, y, width, height)
+        # 强制列表宽度 = 父容器宽度
+        style = ttk.Style()
+        style.configure("ArrowOnly.TCombobox", postoffset=(x_offset, 0, parent_width-my_width, 0))
 
     # --- 界面逻辑 ---
     def toggle_empty_state(self, is_empty):
@@ -270,6 +358,10 @@ class NormalView(tk.Frame):
         self.text_area.config(state="disabled")
 
     def append_msg(self, record, sender_name):
+        # 确保聊天界面是显示的
+        if not self.main_chat.winfo_ismapped():
+            self.toggle_empty_state(False)
+
         self.text_area.config(state="normal")
         self._insert_record(record, sender_name)
         self.text_area.see(tk.END)
@@ -277,11 +369,7 @@ class NormalView(tk.Frame):
 
     def _insert_record(self, rec, name_to_display):
         tag = "normal_self" if rec["type"] == "self" else "normal_peer"
-        header = (
-            f"[{rec['time']}]"
-            if rec["type"] == "self"
-            else f"[{name_to_display} {rec['time']}]"
-        )
+        header = f"[{rec['time']}]" if rec["type"] == "self" else f"[{name_to_display} {rec['time']}]"
 
         self.text_area.insert(tk.END, header + "\n", ("time_tag", tag))
         self.text_area.insert(tk.END, rec["msg"] + "\n\n", tag)
@@ -292,6 +380,7 @@ class NormalView(tk.Frame):
         self.text_area.delete("1.0", tk.END)
         self.text_area.config(state="disabled")
         self.controller.target_addr = None
+        self.toggle_empty_state(True)
 
     def refresh_contacts(self):
         self.contact_list.delete(0, tk.END)
@@ -329,13 +418,36 @@ class NormalView(tk.Frame):
         self.controller.add_new_contact()
         self.refresh_contacts()
 
-    def _on_return(self, event):
-        if event.state & 0x0004:
-            return
+    # --- 发送与快捷键逻辑 ---
+    def _send_msg_action(self):
         msg = self.input_area.get("1.0", "end-1c").strip()
+        if not msg:
+            return
         self.input_area.delete("1.0", tk.END)
         self.controller.handle_chat_send(msg, "normal_self")
-        return "break"
+
+    def _on_return(self, event):
+        """优化后的回车处理：支持 Ctrl+Enter 和 Enter 切换"""
+        mode = self.send_mode_var.get()
+        # 判断是否按下 Ctrl (state 4 或 20000 视系统而定) 或 Shift
+        is_ctrl = (event.state & 0x0004) or (event.state & 0x20000)
+        is_shift = event.state & 0x0001
+
+        if mode == "Enter":
+            if not is_ctrl and not is_shift:
+                # 纯 Enter -> 发送
+                self._send_msg_action()
+                return "break"  # 阻止换行
+            # Ctrl/Shift + Enter -> 默认换行
+
+        elif mode == "Ctrl+Enter":
+            if is_ctrl:
+                # Ctrl + Enter -> 发送
+                self._send_msg_action()
+                return "break"
+            # 纯 Enter -> 默认换行
+
+        return None
 
     def log(self, text, tag="normal_peer", no_newline=False):
         self.text_area.config(state="normal")
@@ -360,9 +472,7 @@ class WpsView(tk.Frame):
         self.ribbon_container.pack(fill="x", side="top")
         self.ribbon_container.pack_propagate(False)
 
-        self.tabs_frame = tk.Frame(
-            self.ribbon_container, bg=scheme["bg_ribbon"], height=30
-        )
+        self.tabs_frame = tk.Frame(self.ribbon_container, bg=scheme["bg_ribbon"], height=30)
         self.tabs_frame.pack(fill="x", side="top")
 
         self.tools_panel = tk.Frame(self.ribbon_container, bg=scheme["bg_ribbon"])
@@ -382,9 +492,7 @@ class WpsView(tk.Frame):
         self._init_menu_tabs(scheme)
         self._switch_tab("开始")
 
-        main_paned = tk.PanedWindow(
-            self, orient="horizontal", bg=scheme["bg_root"], sashwidth=4
-        )
+        main_paned = tk.PanedWindow(self, orient="horizontal", bg=scheme["bg_root"], sashwidth=4)
         main_paned.pack(fill="both", expand=True)
 
         doc_container = tk.Frame(main_paned, bg=scheme["bg_root"])
@@ -446,7 +554,7 @@ class WpsView(tk.Frame):
             font=("Arial", 12, "bold"),
         ).pack(side="left", padx=10)
 
-        # [修复] 这里的 title 从全局 THEMES 读取，而不是 style (因为 style 是子字典 dark/light)
+        # [修复] 这里的 title 从全局 THEMES 读取
         tk.Label(
             title_bar,
             text=THEMES["wps"]["title"],
@@ -516,15 +624,11 @@ class WpsView(tk.Frame):
             rmargin=20,
             lmargin1=5,
         )
-        self.chat_log.tag_config(
-            "time_tag", foreground="#999", font=("Arial", 8), justify="center"
-        )
+        self.chat_log.tag_config("time_tag", foreground="#999", font=("Arial", 8), justify="center")
 
         input_frm = tk.Frame(sidebar, bg=style["bg_root"], height=40)
         input_frm.pack(side="bottom", fill="x", padx=10, pady=10)
-        tk.Label(input_frm, text="Ask:", bg=style["bg_root"], fg="#aaa").pack(
-            side="left"
-        )
+        tk.Label(input_frm, text="Ask:", bg=style["bg_root"], fg="#aaa").pack(side="left")
         self.input = tk.Entry(
             input_frm,
             bg=style["bg_root"],
@@ -593,9 +697,7 @@ class WpsView(tk.Frame):
     def _render_home_toolbar(self):
         style = self.scheme
 
-        def create_tool_btn(
-            parent, text, cmd, width=3, fg=style["fg_ui"], font_spec=("Times", 9)
-        ):
+        def create_tool_btn(parent, text, cmd, width=3, fg=style["fg_ui"], font_spec=("Times", 9)):
             btn = tk.Button(
                 parent,
                 text=text,
@@ -617,16 +719,12 @@ class WpsView(tk.Frame):
         f_font_top = tk.Frame(f_font, bg=style["bg_ribbon"])
         f_font_top.pack(side="top", fill="x")
         font_families = sorted(font.families())
-        self.cb_font = ttk.Combobox(
-            f_font_top, values=font_families, width=12, state="readonly"
-        )
+        self.cb_font = ttk.Combobox(f_font_top, values=font_families, width=12, state="readonly")
         self.cb_font.set("Times New Roman")
         self.cb_font.pack(side="left", padx=2)
         self.cb_font.bind("<<ComboboxSelected>>", lambda e: self._apply_font_family())
 
-        self.cb_size = ttk.Combobox(
-            f_font_top, values=[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 36, 48], width=3
-        )
+        self.cb_size = ttk.Combobox(f_font_top, values=[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 36, 48], width=3)
         self.cb_size.set(12)
         self.cb_size.pack(side="left", padx=2)
         self.cb_size.bind("<<ComboboxSelected>>", lambda e: self._apply_font_size())
@@ -667,9 +765,7 @@ class WpsView(tk.Frame):
         )
         create_tool_btn(f_font_bot, "🖊️", self._choose_bg_color, fg="orange")
 
-        ttk.Separator(self.tools_panel, orient="vertical").pack(
-            side="left", fill="y", padx=5
-        )
+        ttk.Separator(self.tools_panel, orient="vertical").pack(side="left", fill="y", padx=5)
 
         f_para = tk.Frame(self.tools_panel, bg=style["bg_ribbon"])
         f_para.pack(side="left", padx=5)
