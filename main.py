@@ -24,8 +24,13 @@ class UltimateChat:
         self.current_path = os.getcwd()
 
         self.displayed_contacts = CONTACTS[:]
-        self.target_addr = ("127.0.0.1", PORT)
+        self.target_addr = None  # 初始不连接任何人
         self.target_name = None  # 初始无选中联系人
+        self.target_ip = None  # 新增：用于索引聊天记录
+
+        # === 核心：聊天记录存储 ===
+        # 结构: { '192.168.1.20': [ {'type': 'self'/'peer', 'msg': '...', 'time': '...'}, ... ] }
+        self.chat_history = {}
 
         # Python 解释器状态
         self.in_python_mode = False
@@ -79,7 +84,11 @@ class UltimateChat:
             self.root.title(THEMES["cmd"]["title"])
             self.root.configure(bg=THEMES["cmd"]["bg_root"])
             self.current_view = CmdView(self.root, self)
-            self._log_to_cmd_view(f"{self.current_path}>", no_newline=True)
+            # self._log_to_cmd_view(f"{self.current_path}>", no_newline=True)
+            if self.in_python_mode:
+                self._log_to_cmd_view(">>> ", no_newline=True)
+            else:
+                self._log_to_cmd_view(f"{self.current_path}>", no_newline=True)
 
         elif mode == "normal":
             self.root.overrideredirect(False)
@@ -102,6 +111,8 @@ class UltimateChat:
             self.root.after(10, self.set_app_window)
 
         self.current_view.pack(fill="both", expand=True)
+        # 切换模式后，立即加载当前选中联系人的历史记录
+        self.load_history_to_view()
 
     def _update_app_icon(self, mode):
         icon_path = ICONS.get(mode)
@@ -119,9 +130,27 @@ class UltimateChat:
         self.is_dark_mode = not self.is_dark_mode
         self.switch_mode(self.current_mode)
 
+    # ================= 联系人管理 =================
     def set_target(self, contact):
         self.target_addr = (contact["ip"], contact["port"])
         self.target_name = contact["name"]
+        self.target_ip = contact["ip"]
+        # 切换联系人时，加载该人的历史记录
+        self.load_history_to_view()
+    def load_history_to_view(self):
+        # 将内存中的聊天记录渲染到当前视图
+        # 如果没有选中联系人，且在 Normal 模式，显示空状态
+        if not self.target_ip:
+            if hasattr(self.current_view, "toggle_empty_state"):
+                self.current_view.toggle_empty_state(is_empty=True)
+            return
+
+        # 获取记录
+        records = self.chat_history.get(self.target_ip, [])
+
+        # 通知视图层渲染
+        if hasattr(self.current_view, "render_history"):
+            self.current_view.render_history(records, self.target_name)
 
     def add_new_contact(self):
         name = simpledialog.askstring("Add", "Name:")
@@ -164,8 +193,11 @@ class UltimateChat:
             if messagebox.askyesno("确认", f"确定删除 {contact['name']} 吗?"):
                 if self.target_name == contact["name"]:
                     self.target_name = None
+                    self.target_ip = None
+                    self.target_addr = None
                     if hasattr(self.current_view, "reset_chat_area"):
                         self.current_view.reset_chat_area()
+                    self.load_history_to_view()
 
                 self.displayed_contacts.pop(idx)
                 for i, c in enumerate(CONTACTS):
@@ -191,6 +223,22 @@ class UltimateChat:
     def on_message_received(self, msg, ip):
         self.root.after(0, lambda: self._distribute_msg(msg, ip))
 
+    def _process_received_msg(self, msg, ip):
+        # 1. 存入历史记录
+        if ip not in self.chat_history:
+            self.chat_history[ip] = []
+
+        time_str = datetime.now().strftime("%H:%M")
+        record = {"type": "peer", "msg": msg, "time": time_str}
+        self.chat_history[ip].append(record)
+
+        # 2. 如果当前正在看这个人（或者是CMD模式），更新UI
+        if self.current_mode == "cmd" or self.target_ip == ip:
+            if hasattr(self.current_view, "append_msg"):
+                # 查找发送者名字
+                sender_name = next((c["name"] for c in CONTACTS if c["ip"] == ip), ip)
+                self.current_view.append_msg(record, sender_name)
+
     def _distribute_msg(self, msg, ip):
         name = next((c["name"] for c in CONTACTS if c["ip"] == ip), ip)
         time_str = datetime.now().strftime("%H:%M")
@@ -208,16 +256,27 @@ class UltimateChat:
             self.current_view.log(f"[{name}] [{time_str}]: {msg}\n", "ai_peer")
 
     def handle_chat_send(self, msg, tag_self):
-        if not msg:
+        if not msg or not self.target_addr:
             return
-        self.network.send(msg, self.target_addr)
+        self.network.send(msg, self.target_addr)# 先发后存，确保网络异常时不丢记录
+        # 存入历史记录
+        target_ip = self.target_addr[0]
+        if target_ip not in self.chat_history:
+            self.chat_history[target_ip] = []
         time_str = datetime.now().strftime("%H:%M")
+        record = {"type": "self", "msg": msg, "time": time_str}
+        self.chat_history[target_ip].append(record)
 
+        # 更新 UI
+        if hasattr(self.current_view, "append_msg"):
+            self.current_view.append_msg(record, "我")
+        """
         if self.current_mode == "normal":
             self.current_view.log(f"{msg} :[{time_str}]\n", tag_self)
         else:
             self.current_view.log(f"{msg}\n", tag_self)
-
+        """
+    
     def handle_cmd_input(self, msg):
         if not self.in_python_mode and msg.lower() == "python":
             self.in_python_mode = True

@@ -126,7 +126,7 @@ class NormalView(tk.Frame):
             command=self._add_contact,
         ).pack(side="right")
 
-        mode_btn_txt = "☼" if is_dark else "☾"
+        mode_btn_txt = "☀️" if is_dark else "🌙"
         tk.Button(
             search_frm,
             text=mode_btn_txt,
@@ -161,10 +161,23 @@ class NormalView(tk.Frame):
         self.main_chat = tk.Frame(paned, bg=self.colors["bg_root"])
         paned.add(self.main_chat)
 
+        # 1. 空状态页面
+        self.empty_frame = tk.Frame(self.right_container, bg=self.colors["bg_root"])
+        tk.Label(
+            self.empty_frame,
+            text="未选择联系人",
+            bg=self.colors["bg_root"],
+            fg=self.colors["fg_primary"],
+            font=("微软雅黑", 14),
+        ).place(relx=0.5, rely=0.5, anchor="center")
+
+        # 2. 聊天页面
+        self.main_chat = tk.Frame(self.right_container, bg=self.colors["bg_root"])
+
         # 头部
         self.header_label = tk.Label(
             self.main_chat,
-            text=self.controller.target_name or "未选择",
+            text=self.controller.target_name or "",
             bg=self.colors["bg_root"],
             fg=self.colors["fg_primary"],
             font=("微软雅黑", 12, "bold"),
@@ -230,6 +243,48 @@ class NormalView(tk.Frame):
         )
         self.input_area.pack(fill="both", expand=True)
         self.input_area.bind("<Return>", self._on_return)
+        # 初始显示空状态
+        self.toggle_empty_state(True)
+
+    # --- 界面逻辑 ---
+    def toggle_empty_state(self, is_empty):
+        if is_empty:
+            self.main_chat.pack_forget()
+            self.empty_frame.pack(fill="both", expand=True)
+        else:
+            self.empty_frame.pack_forget()
+            self.main_chat.pack(fill="both", expand=True)
+
+    def render_history(self, records, target_name):
+        """加载某人的所有历史记录"""
+        self.toggle_empty_state(False)
+        self.header_label.config(text=target_name)
+
+        self.text_area.config(state="normal")
+        self.text_area.delete("1.0", tk.END)
+
+        for rec in records:
+            self._insert_record(rec, target_name)
+
+        self.text_area.see(tk.END)
+        self.text_area.config(state="disabled")
+
+    def append_msg(self, record, sender_name):
+        self.text_area.config(state="normal")
+        self._insert_record(record, sender_name)
+        self.text_area.see(tk.END)
+        self.text_area.config(state="disabled")
+
+    def _insert_record(self, rec, name_to_display):
+        tag = "normal_self" if rec["type"] == "self" else "normal_peer"
+        header = (
+            f"[{rec['time']}]"
+            if rec["type"] == "self"
+            else f"[{name_to_display} {rec['time']}]"
+        )
+
+        self.text_area.insert(tk.END, header + "\n", ("time_tag", tag))
+        self.text_area.insert(tk.END, rec["msg"] + "\n\n", tag)
 
     def reset_chat_area(self):
         self.header_label.config(text="未选择联系人")
@@ -355,6 +410,26 @@ class WpsView(tk.Frame):
         )
 
         self._build_sidebar(main_paned, scheme)
+
+    def render_history(self, records, target_name):
+        self.chat_log.config(state="normal")
+        self.chat_log.delete("1.0", tk.END)
+        for rec in records:
+            self._insert_wps_record(rec, target_name)
+        self.chat_log.see(tk.END)
+        self.chat_log.config(state="disabled")
+
+    def append_msg(self, record, sender_name):
+        self.chat_log.config(state="normal")
+        self._insert_wps_record(record, sender_name)
+        self.chat_log.see(tk.END)
+        self.chat_log.config(state="disabled")
+
+    def _insert_wps_record(self, rec, name):
+        tag = "ai_me" if rec["type"] == "self" else "ai_peer"
+        header = f"[{name} {rec['time']}]"
+        self.chat_log.insert(tk.END, header + "\n", "time_tag")
+        self.chat_log.insert(tk.END, rec["msg"] + "\n\n", tag)
 
     def _build_title_bar(self, style):
         title_bar = tk.Frame(self, bg=style["bg_header"], height=35)
