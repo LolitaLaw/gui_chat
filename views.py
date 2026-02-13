@@ -246,50 +246,49 @@ class NormalView(tk.Frame):
         input_inner = tk.Frame(input_frm, bg=self.colors["bg_root"])
         input_inner.pack(fill="both", expand=True, padx=15, pady=15)
         # =========== 组合发送按钮和模式选择框 ===========
-        send_bg = "#e9e9e9"# 统一背景色
-        self.send_composite = tk.Frame(input_inner, bg=send_bg)  
-        self.send_composite.pack(side="right", anchor="center", padx=(5, 15))
+        send_bg = "#e9e9e9"
+        self.send_composite = tk.Frame(input_inner, bg=send_bg)
+        self.send_composite.pack(side="right", anchor="center", padx=(5, 10))
 
-        # 发送按钮
+        # 左半部分：发送按钮
         tk.Button(
             self.send_composite,
             text="发送(S)",
-            bg="#e9e9e9",
+            bg=send_bg,
             fg="black",
             bd=0,
             font=("微软雅黑", 9),
-            padx=8,
+            padx=10,
             pady=5,
             cursor="hand2",
+            activebackground="#d0d0d0",
             command=self._send_msg_action,
         ).pack(side="left", fill="y")
 
-        # 分割线 (视觉分割)
+        # 中间分割线
         tk.Frame(self.send_composite, width=1, bg="#ccc").pack(side="left", fill="y", pady=5)
 
-        # === 极简下拉框 (仅显示箭头) ===
-        style = ttk.Style()
-        style.theme_use("clam")
-
-        # 定义核心 Layout：移除 Textarea，只保留 Downarrow 并铺满
-        style.layout("ArrowOnly.TCombobox", [("Combobox.downarrow", {"sticky": "nswe"})])
-        # 配置样式：去除边框，背景色与 Frame 一致
-        style.configure("ArrowOnly.TCombobox", background=send_bg, bordercolor=send_bg, darkcolor=send_bg, lightcolor=send_bg, arrowsize=12)
-        # 鼠标悬停变色效果
-        style.map("ArrowOnly.TCombobox", background=[("active", "#d0d0d0")], arrowcolor=[("active", "black")])
-
-        # width=0 配合 ArrowOnly layout，只会显示箭头按钮的宽度
-        self.cb_send_mode = ttk.Combobox(
+        # 右半部分：小三角按钮
+        self.btn_arrow = tk.Button(
             self.send_composite,
-            textvariable=self.send_mode_var,
-            values=["Enter", "Ctrl+Enter"],
-            state="readonly",
-            width=0,
-            style="ArrowOnly.TCombobox",
+            text="▼",
+            bg=send_bg,
+            fg="#555",
+            bd=0,
+            font=("Arial", 7),
+            padx=4,
+            cursor="hand2",
+            activebackground="#d0d0d0",
+            command=self._show_send_menu,
         )
-        self.cb_send_mode.pack(side="left", fill="y")
-        # 绑定点击事件，动态调整下拉列表宽度
-        self.cb_send_mode.bind("<Button-1>", self._update_combo_popdown)
+        self.btn_arrow.pack(side="left", fill="y")
+
+        # 隐藏的弹出菜单 (配置到变量)
+        self.send_menu = tk.Menu(self, tearoff=0)
+        self.send_menu.add_radiobutton(label="Enter", variable=self.send_mode_var, value="Enter 发送")
+        self.send_menu.add_radiobutton(label="Ctrl+Enter", variable=self.send_mode_var, value="Ctrl+Enter 发送")
+
+        # === 文本输入框 (左侧) ===
         self.input_area = tk.Text(
             input_inner,
             height=1,
@@ -301,38 +300,17 @@ class NormalView(tk.Frame):
         )
         self.input_area.pack(side="left", fill="both", expand=True)
         self.input_area.bind("<Return>", self._on_return)
-        """
-        # 文本输入框
-        self.input_area = tk.Text(
-            input_frm,
-            height=5,
-            bg=self.colors["bg_input"],
-            fg=self.colors["fg_primary"],
-            font=THEMES["normal"]["font_main"],
-            bd=0,
-            insertbackground=self.colors["fg_primary"],
-            padx=10,
-            pady=5,
-        )
-        self.input_area.pack(side="top", fill="both", expand=True)
-        self.input_area.bind("<Return>", self._on_return)
-        """
+
         # 初始显示空状态
         self.toggle_empty_state(True)
 
-    # --- 动态计算并设置下拉列表宽度 ---
-    def _update_combo_popdown(self, event):
-        # 1. 获取父容器（组合键整体）宽度
-        parent_width = self.send_composite.winfo_width()
-        # 2. 获取下拉箭头自身宽度
-        my_width = self.cb_send_mode.winfo_width()
-        # 3. 计算偏移量 (向左偏移，使列表左边缘与父容器对齐)
-        x_offset = -(parent_width - my_width)
-
-        # 4. 配置 postoffset = (x, y, width, height)
-        # 强制列表宽度 = 父容器宽度
-        style = ttk.Style()
-        style.configure("ArrowOnly.TCombobox", postoffset=(x_offset, 0, parent_width-my_width, 0))
+    # --- 显示菜单逻辑 ---
+    def _show_send_menu(self):
+        # 在箭头按钮的左下角弹出菜单
+        # x = self.btn_arrow.winfo_rootx()# 获取按钮自己的x坐标
+        x = self.send_composite.winfo_rootx()# 获取组合键的x坐标，这样菜单就能和发送按钮对齐了
+        y = self.btn_arrow.winfo_rooty() + self.btn_arrow.winfo_height()
+        self.send_menu.tk_popup(x, y)
 
     # --- 界面逻辑 ---
     def toggle_empty_state(self, is_empty):

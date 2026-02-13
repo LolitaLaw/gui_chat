@@ -16,7 +16,7 @@ from ctypes import windll
 
 
 class UltimateChat:
-    def __init__(self, root):
+    def __init__(self, root,start_mode="cmd"):
         self.root = root
         self.current_mode = None
         self.current_view = None
@@ -46,9 +46,16 @@ class UltimateChat:
             sys.exit(1)
 
         self.setup_window()
-        # self.switch_mode("normal")
-        self.switch_mode("cmd")
+        self.switch_mode(start_mode)# 默认启动到 CMD 模式，方便调试
         self.set_app_window()
+
+    # 窗口居中方法
+    def center_window(self, width=900, height=600):
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = (screen_width / 2) - (width / 2)
+        y = (screen_height / 2) - (height / 2)
+        self.root.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
 
     def set_app_window(self):
         GWL_EXSTYLE = -20
@@ -67,7 +74,7 @@ class UltimateChat:
             print(f"Force Taskbar Icon Failed: {e}")
 
     def setup_window(self):
-        self.root.geometry("900x600")
+        self.center_window(900, 600)
         self.root.bind("<F10>", lambda e: self.switch_mode("cmd"))
         self.root.bind("<F11>", lambda e: self.switch_mode("wps"))
         self.root.bind("<F12>", lambda e: self.switch_mode("normal"))
@@ -339,6 +346,7 @@ if __name__ == "__main__":
         windll.shcore.SetProcessDpiAwareness(1)
     except:
         pass
-    app = UltimateChat(root)
+    STARTUP_MODE = "normal"
+    app = UltimateChat(root, start_mode=STARTUP_MODE)
     root.protocol("WM_DELETE_WINDOW", app.on_close)
     root.mainloop()
