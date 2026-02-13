@@ -34,9 +34,9 @@ COLOR_SCHEMES = {
         "fg_primary": "#cccccc",
         "border": "#333333",
         "bg_hover": "#3a3d41",
-        "bg_select": "#094771",  # 选中项背景
-        # 气泡
-        "bg_self": "#98e165",
+        "bg_select": "#3a3d41",  # 深色模式选中背景
+        "accent": "#3370ff",     # 蓝色竖线颜色
+        "bg_self": "#98e165", 
         "fg_self": "#000000",
         "bg_peer": "#2d2d2d",
         "fg_peer": "#ffffff",
@@ -46,17 +46,18 @@ COLOR_SCHEMES = {
         "scroll_handle_hover": "#777777",
     },
     "light": {
-        "bg_root": "#f5f5f5",      # 主背景浅灰
-        "bg_sidebar": "#e7e7e7",   # 侧栏稍深
-        "bg_input": "#ffffff",     # 输入框纯白
-        "fg_primary": "#000000",   # 主字体黑色
-        "border": "#d6d6d6",       # 边框灰色
-        "bg_hover": "#dcdcdc",     # 列表悬停
-        "bg_select": "#cce8ff",    # 列表选中
-        "bg_self": "#95ec69",      # 微信绿 (浅色下)
-        "fg_self": "#000000",      # 气泡文字黑
-        "bg_peer": "#ffffff",      # 对方气泡纯白
-        "fg_peer": "#000000",      # 对方文字黑
+        "bg_root": "#f5f5f5",
+        "bg_sidebar": "#e7e7e7",
+        "bg_input": "#ffffff",
+        "fg_primary": "#000000",
+        "border": "#d6d6d6",
+        "bg_hover": "#dcdcdc",
+        "bg_select": "#e6f3ff",  # [优化] 极淡蓝色，保证黑色文字清晰
+        "accent": "#1890ff",     # [新增] 亮蓝色竖线
+        "bg_self": "#95ec69",    
+        "fg_self": "#000000",
+        "bg_peer": "#ffffff",    
+        "fg_peer": "#000000",
         "scroll_handle": "#c1c1c1",
         "scroll_handle_hover": "#a8a8a8"
     }

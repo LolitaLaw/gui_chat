@@ -2,12 +2,14 @@
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, 
                              QLineEdit, QPushButton, QLabel, QFrame, 
                              QMenu, QListWidgetItem, QInputDialog, QMessageBox,
-                             QStackedWidget, QAbstractItemView)
+                             QStackedWidget, QAbstractItemView, QTextEdit)
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QColor
 from .base_view import BaseModeView
 from config.settings import THEMES, COLOR_SCHEMES
 from ui.components.chat_delegate import ChatDelegate
+# [新增] 引入联系人代理
+from ui.components.contact_delegate import ContactDelegate
 
 class NormalView(BaseModeView):
     # 信号定义
@@ -46,12 +48,12 @@ class NormalView(BaseModeView):
         self.search_input.setPlaceholderText("搜索")
         self.search_input.textChanged.connect(self._on_search_changed)
         
-        self.add_btn = QPushButton("+")
+        self.add_btn = QPushButton("➕️")
         self.add_btn.setFixedSize(30, 30)
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_btn.clicked.connect(self._on_add_btn_clicked)
         
-        self.mode_btn = QPushButton("◑")
+        self.mode_btn = QPushButton("☀️")
         self.mode_btn.setFixedSize(30, 30)
         self.mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mode_btn.clicked.connect(self._on_toggle_theme)
@@ -67,7 +69,11 @@ class NormalView(BaseModeView):
         self.contact_list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.contact_list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.contact_list_widget.itemClicked.connect(self._on_contact_clicked)
-        # 设置列表项的间距
+        
+        # [核心] 安装联系人绘图代理
+        self.contact_delegate = ContactDelegate(self.contact_list_widget, self.current_theme)
+        self.contact_list_widget.setItemDelegate(self.contact_delegate)
+        # 设置行间距，让背景块之间有空隙 (如果 Delegate 画了圆角背景)
         self.contact_list_widget.setSpacing(2) 
         sidebar_layout.addWidget(self.contact_list_widget)
 
@@ -112,11 +118,10 @@ class NormalView(BaseModeView):
         # 2. [核心替换] 消息记录使用 QListWidget 而不是 QTextEdit
         self.history_list = QListWidget()
         self.history_list.setFrameShape(QFrame.Shape.NoFrame)
-        self.history_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel) # 像素级滚动更平滑
-        self.history_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff) # 关闭横向滚动条
-        self.history_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection) # 禁止选中整行
-        
-        # [关键] 设置绘图代理
+        self.history_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.history_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.history_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        # 安装绘图代理
         self.chat_delegate = ChatDelegate(self.history_list, self.current_theme)
         self.history_list.setItemDelegate(self.chat_delegate)
         
@@ -203,8 +208,13 @@ class NormalView(BaseModeView):
     def update_theme(self, is_dark):
         self.is_dark = is_dark
         self.current_theme = COLOR_SCHEMES["dark"] if is_dark else COLOR_SCHEMES["light"]
-        self.chat_delegate.set_theme(self.current_theme) # 更新代理主题
-        self.history_list.viewport().update() # 重绘列表
+        # 更新两个代理的主题
+        self.chat_delegate.set_theme(self.current_theme)
+        self.contact_delegate.set_theme(self.current_theme) # [新增]
+        
+        self.history_list.viewport().update()
+        self.contact_list_widget.viewport().update() # [新增]
+        
         self._apply_styles()
 
     def _apply_styles(self):
@@ -215,17 +225,40 @@ class NormalView(BaseModeView):
         self.sidebar.setStyleSheet(f"background-color: {theme['bg_sidebar']};")
         self.header_label.setStyleSheet(f"color: {theme['fg_primary']}; font-weight: bold;")
         
-        self.search_input.setStyleSheet(f"background-color: {theme['bg_input']}; color: {theme['fg_primary']}; border: 1px solid {theme['border']}; border-radius: 4px; padding: 4px;")
-        
-        # 列表样式
-        self.contact_list_widget.setStyleSheet(f"""
-            QListWidget {{ background-color: {theme['bg_sidebar']}; border: none; outline: none; }}
-            QListWidget::item {{ padding: 8px; border-radius: 4px; margin: 2px 5px; color: {theme['fg_primary']}; }}
-            QListWidget::item:selected {{ background-color: {theme['bg_select']}; color: white; }}
-            QListWidget::item:hover {{ background-color: {theme['bg_hover']}; }}
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {theme['bg_input']}; 
+                color: {theme['fg_primary']};
+                border: 1px solid {theme['border']}; 
+                border-radius: 4px; 
+                padding: 4px;
+            }}
         """)
         
-        # 聊天列表背景
+        btn_style = f"""
+            QPushButton {{ 
+                background-color: transparent; 
+                border: 1px solid {theme['border']}; 
+                border-radius: 4px; 
+                color: {theme['fg_primary']}; 
+            }}
+            QPushButton:hover {{ background-color: {theme['bg_hover']}; }}
+        """
+        self.add_btn.setStyleSheet(btn_style)
+        self.mode_btn.setStyleSheet(btn_style)
+
+        # [修改] 联系人列表 QSS：移除 border-left 相关的代码，只保留基础背景
+        # 具体的选中背景色和竖线由 Delegate 绘制
+        self.contact_list_widget.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {theme['bg_sidebar']};
+                border: none;
+                outline: none;
+            }}
+            /* 注意：这里不再设置 item 的 border 和 selection-background-color */
+            /* 完全交给 Delegate 处理，防止样式冲突 */
+        """)
+        
         self.history_list.setStyleSheet(f"background-color: {theme['bg_root']}; border: none;")
 
         # 分割线
