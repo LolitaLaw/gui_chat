@@ -16,7 +16,7 @@ class AppController(QObject):
 
         self.ui = None
         self.current_view = None
-        self.target_contact = None 
+        self.target_contact = None
         self.is_dark_mode = True
         
         # 用于记录 CMD 模式下的上一个联系人，避免重复提示
@@ -51,8 +51,10 @@ class AppController(QObject):
         try:
             v = self.current_view
             # 断开可能存在的旧连接，防止信号重复触发
-            try: v.command_submitted.disconnect()
-            except: pass
+            try: 
+                v.command_submitted.disconnect()
+            except: 
+                pass
             
             v.command_submitted.connect(self._handle_cmd_input)
             
@@ -60,8 +62,8 @@ class AppController(QObject):
             current_text = v.console.toPlainText()
             prompt = f"{self.cmd_processor.current_path}>"
             
-            # 优化点 1: 判断聊天目标是否发生了改变
-            if self.target_contact != self._last_cmd_target:
+            # 判断聊天目标是否发生了改变
+            if self.target_contact != getattr(self, '_last_cmd_target', None):
                 self._last_cmd_target = self.target_contact
                 
                 # 为了排版美观，如果当前终端最后没有换行符，补一个换行
