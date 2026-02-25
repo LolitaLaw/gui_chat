@@ -19,8 +19,12 @@ class AppController(QObject):
         self.target_contact = None
         self.is_dark_mode = True
         
-        # 用于记录 CMD 模式下的上一个联系人，避免重复提示
-        self._last_cmd_target = None 
+        # [核心修复1] 记录上一个聊天对象，防止盲发和多余提示
+        self._last_cmd_target = None
+        
+        # [核心修复：绝杀重复绑定的集合]
+        # 记录哪些视图已经绑定过信号，绑定过的绝对不再绑第二次！
+        self._bound_views = set()
 
     def bind_ui(self, main_window):
         self.ui = main_window
@@ -33,6 +37,10 @@ class AppController(QObject):
             print("Error: Port occupied.")
 
     def switch_mode(self, mode_name):
+        # 【核心防御机制】如果当前已经是该模式，直接拦截！防止狂按快捷键产生Bug
+        if self.ui and self.ui.current_mode == mode_name:
+            return
+
         self.ui.set_mode_view(mode_name)
         self.current_view = self.ui.current_view
 
@@ -50,20 +58,17 @@ class AppController(QObject):
     def _bind_cmd_view(self):
         try:
             v = self.current_view
-            # 断开可能存在的旧连接，防止信号重复触发
-            try: 
-                v.command_submitted.disconnect()
-            except: 
-                pass
-            
-            v.command_submitted.connect(self._handle_cmd_input)
-            
+            # [修复点] 如果这个视图没有被绑定过，才进行绑定
+            if v not in self._bound_views:
+                v.command_submitted.connect(self._handle_cmd_input)
+                self._bound_views.add(v)
+
             # 获取当前终端内已有的所有文本
             current_text = v.console.toPlainText()
             prompt = f"{self.cmd_processor.current_path}>"
-            
-            # 判断聊天目标是否发生了改变
-            if self.target_contact != getattr(self, '_last_cmd_target', None):
+
+            # [修复点] 判断聊天目标是否发生了改变
+            if self.target_contact != self._last_cmd_target:
                 self._last_cmd_target = self.target_contact
                 
                 # 为了排版美观，如果当前终端最后没有换行符，补一个换行
@@ -86,26 +91,17 @@ class AppController(QObject):
     def _bind_normal_view(self):
         try:
             v = self.current_view
-            try: v.contact_selected.disconnect()
-            except: pass
-            try: v.message_sent.disconnect()
-            except: pass
-            try: v.contact_added.disconnect()
-            except: pass
-            try: v.contact_deleted.disconnect()
-            except: pass
-            try: v.contact_modified.disconnect()
-            except: pass
-            try: v.theme_toggled.disconnect()
-            except: pass
-            
-            v.contact_selected.connect(self._on_contact_selected)
-            v.message_sent.connect(self._on_normal_msg_sent)
-            v.contact_added.connect(self._on_contact_added)
-            v.contact_deleted.connect(self._on_contact_deleted)
-            v.contact_modified.connect(self._on_contact_modified)
-            v.theme_toggled.connect(self.toggle_color_scheme)
-            
+            # 使用 _bound_views 防重复绑定
+            if v not in self._bound_views:
+                v.contact_selected.connect(self._on_contact_selected)
+                v.message_sent.connect(self._on_normal_msg_sent)
+                v.contact_added.connect(self._on_contact_added)
+                v.contact_deleted.connect(self._on_contact_deleted)
+                v.contact_modified.connect(self._on_contact_modified)
+                v.theme_toggled.connect(self.toggle_color_scheme)
+                self._bound_views.add(v)
+
+            # 初始化状态
             v.update_contacts(self.store.contacts)
             v.update_theme(self.is_dark_mode)
             
@@ -120,22 +116,12 @@ class AppController(QObject):
     def _bind_wps_view(self):
         try:
             v = self.current_view
-            # 断开旧连接
-            try: v.message_sent.disconnect()
-            except: pass
-            try: v.window_minimized.disconnect()
-            except: pass
-            try: v.window_closed.disconnect()
-            except: pass
+            if v not in self._bound_views:
+                v.message_sent.connect(self._on_wps_msg_sent)
+                v.window_minimized.connect(self.ui.showMinimized)
+                v.window_closed.connect(self.ui.close)
+                self._bound_views.add(v)
 
-            # 连接新信号
-            v.message_sent.connect(self._on_wps_msg_sent)
-            
-            # 窗口控制
-            v.window_minimized.connect(self.ui.showMinimized)
-            v.window_closed.connect(self.ui.close)
-            
-            # 如果有选中的联系人，加载历史记录
             if self.target_contact:
                 history = self.store.get_history(self.target_contact.ip)
                 v.display_history(history, self.target_contact.name)
@@ -219,6 +205,8 @@ class AppController(QObject):
         if self.target_contact == contact:
             self.target_contact = None
             self._last_cmd_target = None
+            if hasattr(self.current_view, "header_label"):
+                self.current_view.header_label.setText("未选择联系人") # 待注释
         self.current_view.update_contacts(self.store.contacts)
 
     @pyqtSlot(object, str)
@@ -283,21 +271,16 @@ class AppController(QObject):
         contact = self.store.get_contact_by_ip(ip)
         sender_name = contact.name if contact else "Unknown"
 
-        if self.ui.current_mode == "normal" or self.ui.current_mode == "wps":
-            # 如果正好看的是这个人，追加气泡
+        if self.ui.current_mode in ["normal", "wps"]:
             if self.target_contact and self.target_contact.ip == ip:
                 self.current_view.append_message(msg)
         elif self.ui.current_mode == "cmd":
             # 在终端直接打印日志
             self.current_view.append_text(f"\n[Recv from {sender_name} ({ip})]: {content}\n{self.cmd_processor.current_path}>", "info")
 
-    def _bind_cmd_view(self):
-        try:
-            self.current_view.command_submitted.connect(self._handle_cmd_input)
-            self.current_view.append_text(f"{self.cmd_processor.current_path}>", "info")
-        except: pass
+
     
-    def _bind_wps_view(self): pass
+
 
     def _handle_cmd_input(self, cmd):
         handled = self.cmd_processor.process(cmd)
@@ -316,5 +299,7 @@ class AppController(QObject):
 
     def _on_cmd_output(self, text, tag):
         if self.ui.current_mode == "cmd" and self.current_view:
-            if tag == "clear": self.current_view.clear_screen()
-            else: self.current_view.append_text(text, tag)
+            if tag == "clear":
+                self.current_view.clear_screen()
+            else:
+                self.current_view.append_text(text, tag)
