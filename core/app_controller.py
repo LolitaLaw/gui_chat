@@ -18,10 +18,10 @@ class AppController(QObject):
         self.current_view = None
         self.target_contact = None
         self.is_dark_mode = True
-        
+
         # [核心修复1] 记录上一个聊天对象，防止盲发和多余提示
         self._last_cmd_target = None
-        
+
         # [核心修复：绝杀重复绑定的集合]
         # 记录哪些视图已经绑定过信号，绑定过的绝对不再绑第二次！
         self._bound_views = set()
@@ -51,6 +51,18 @@ class AppController(QObject):
         elif mode_name == "wps":
             self._bind_wps_view()
 
+        def debug_print_size():
+            if self.current_view and self.ui:
+                view_w = self.current_view.width()
+                view_h = self.current_view.height()
+                win_w = self.ui.width()
+                win_h = self.ui.height()
+                print(
+                    f"[Debug] 模式 '{mode_name}' 加载完毕 | 内部界面大小: {view_w} x {view_h} | 外层窗口大小: {win_w} x {win_h}"
+                )
+
+        QTimer.singleShot(100, debug_print_size)
+        # QTimer.singleShot(100, lambda: print(f"[Debug] 已切换至 {mode_name} 模式，当前窗口大小: {self.ui.width()} x {self.ui.height()}"))
     # ==========================================
     # 模式绑定与数据同步
     # ==========================================
@@ -70,16 +82,16 @@ class AppController(QObject):
             # [修复点] 判断聊天目标是否发生了改变
             if self.target_contact != self._last_cmd_target:
                 self._last_cmd_target = self.target_contact
-                
+
                 # 为了排版美观，如果当前终端最后没有换行符，补一个换行
                 prefix = "\n" if current_text and not current_text.endswith("\n") else ""
-                
+
                 if self.target_contact:
                     v.append_text(f"{prefix}[System] Chat Target: {self.target_contact.name} ({self.target_contact.ip})\n{prompt}", "info")
                     # v.append_text(f"\n[System] Current Chat Target: {self.target_contact.name} ({self.target_contact.ip}:{self.target_contact.port})\n{self.cmd_processor.current_path}>", "info")
                 else:
                     v.append_text(f"{prefix}[System] No Chat Target Selected. Select in Normal Mode.\n{prompt}", "error")
-            
+
             # 优化点 2: 目标没变，但如果终端是空的（比如程序刚启动，或者用户输入了 cls 清屏）
             elif not current_text.strip():
                 # 只有屏幕是空的时候才打印初始提示符，解决切来切去满屏提示符的 Bug
@@ -99,12 +111,13 @@ class AppController(QObject):
                 v.contact_deleted.connect(self._on_contact_deleted)
                 v.contact_modified.connect(self._on_contact_modified)
                 v.theme_toggled.connect(self.toggle_color_scheme)
+                v.contact_unselected.connect(self._on_contact_unselected)# 监听取消选中信号
                 self._bound_views.add(v)
 
             # 初始化状态
             v.update_contacts(self.store.contacts)
             v.update_theme(self.is_dark_mode)
-            
+
             # [同步优化 2] 切回 Normal 时，强制从底层 Store 重新拉取历史记录
             # 这样在 CMD 里发送/接收的消息就会变成漂亮的圆角气泡显示出来
             if self.target_contact:
@@ -125,13 +138,13 @@ class AppController(QObject):
             if self.target_contact:
                 history = self.store.get_history(self.target_contact.ip)
                 v.display_history(history, self.target_contact.name)
-            else:
-                # WPS 模式如果没有目标，默认选第一个或者显示空
-                # 这里为了体验，如果没有选中人，默认选中第一个
-                if self.store.contacts:
-                    self.target_contact = self.store.contacts[0]
-                    history = self.store.get_history(self.target_contact.ip)
-                    v.display_history(history, self.target_contact.name)
+            # else:
+            #     # WPS 模式如果没有目标，默认选第一个或者显示空
+            #     # 这里为了体验，如果没有选中人，默认选中第一个
+            #     if self.store.contacts:
+            #         self.target_contact = self.store.contacts[0]
+            #         history = self.store.get_history(self.target_contact.ip)
+            #         v.display_history(history, self.target_contact.name)
         except Exception as e:
             print(f"Bind WPS Error: {e}")
 
@@ -140,13 +153,13 @@ class AppController(QObject):
         """WPS 模式下的发送逻辑"""
         # 复用 Normal 模式的发送逻辑，或者单独处理
         if not self.target_contact: return
-        
+
         # 发送并存储
         msg = self._send_to_network(content, self.target_contact.ip, self.target_contact.port)
-        
+
         # 更新界面
         self.current_view.append_message(msg)
-        
+
         # Loop 回发模拟
         if self.target_contact.id == 'loopback' or self.target_contact.name.lower() == 'loopback':
             QTimer.singleShot(500, lambda: self._handle_incoming(f"AI Response: {content}", self.target_contact.ip))
@@ -209,6 +222,15 @@ class AppController(QObject):
                 self.current_view.header_label.setText("未选择联系人") # 待注释
         self.current_view.update_contacts(self.store.contacts)
 
+    @pyqtSlot()
+    def _on_contact_unselected(self):
+        """处理正常模式下点击返回 / 双击联系人的逻辑"""
+        self.target_contact = None
+        self._last_cmd_target = None
+        # 如果视图还有头部的 label，清空它备用
+        if hasattr(self.current_view, "header_label"):
+            self.current_view.header_label.setText("")
+
     @pyqtSlot(object, str)
     def _on_contact_modified(self, contact, new_name):
         contact.name = new_name
@@ -245,7 +267,7 @@ class AppController(QObject):
         if not self.target_contact: return
         msg = self._send_to_network(content, self.target_contact.ip, self.target_contact.port)
         self.current_view.append_message(msg)
-        
+
         # [新增] Loop 回发功能
         # 如果是 loopback，模拟延迟自动回复
         if self.target_contact.id == 'loopback' or self.target_contact.name.lower() == 'loopback':
@@ -256,7 +278,7 @@ class AppController(QObject):
         if not self.target_contact: return
         msg = self._send_to_network(content, self.target_contact.ip, self.target_contact.port)
         self.current_view.append_message(msg)
-        
+
         if self.target_contact.id == 'loopback' or self.target_contact.name.lower() == 'loopback':
             QTimer.singleShot(500, lambda: self._handle_incoming(f"AI Response: {content}", self.target_contact.ip))
 
@@ -266,7 +288,7 @@ class AppController(QObject):
     def _handle_incoming(self, content, ip):
         # 收到消息，直接入库
         msg = self.store.add_message(ip, content, "peer")
-        
+
         # [同步优化 3] 查找发信人姓名，让 CMD 模式不再只显示冷冰冰的 IP
         contact = self.store.get_contact_by_ip(ip)
         sender_name = contact.name if contact else "Unknown"
@@ -278,20 +300,16 @@ class AppController(QObject):
             # 在终端直接打印日志
             self.current_view.append_text(f"\n[Recv from {sender_name} ({ip})]: {content}\n{self.cmd_processor.current_path}>", "info")
 
-
-    
-
-
     def _handle_cmd_input(self, cmd):
         handled = self.cmd_processor.process(cmd)
-        
+
         # 如果不是系统命令，当作聊天消息发送
         if not handled:
             if self.target_contact:
                 self._send_to_network(cmd, self.target_contact.ip, self.target_contact.port)
                 # CMD 回显
                 self.current_view.append_text(f"[Sent to {self.target_contact.name}]: {cmd}\n{self.cmd_processor.current_path}>", "info")
-                
+
                 if self.target_contact.id == 'loopback' or self.target_contact.name.lower() == 'loopback':
                     QTimer.singleShot(500, lambda: self._handle_incoming(f"Echo: {cmd}", self.target_contact.ip))
             else:

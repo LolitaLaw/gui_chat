@@ -1,6 +1,7 @@
+# main_window.py
 import ctypes
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QApplication
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, QTimer
 from PyQt6.QtGui import QIcon
 
 from config.settings import THEMES, ICONS
@@ -31,12 +32,35 @@ class MainWindow(QMainWindow):
         # 拖拽相关变量 (用于无边框模式)
         self._drag_pos = QPoint()
 
+        # 用于记录进入 WPS 无边框模式前的窗口尺寸和位置
+        self._saved_size = None
+
     def set_mode_view(self, mode_name):
         """
         切换显示模式
         由 Controller 调用
         """
-        self.current_mode = mode_name
+        if getattr(self, "current_mode", None) == mode_name:
+            return
+
+        old_mode = getattr(self, "current_mode", None)
+        flag_changed = False # 记录边框状态是否发生了改变
+
+        # ==========================================
+        # 记录切换前的绝对坐标位置，根治“左上角漂移”Bug！
+        # ==========================================
+        # current_pos = self.pos()
+        current_pos = self.frameGeometry().topLeft()
+
+        # 精确记录与修改边框状态
+        if mode_name == "wps" and old_mode != "wps":
+            self._saved_size = self.size() # 记录进 WPS 前的客户区大小
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+            flag_changed = True
+
+        elif old_mode == "wps" and mode_name != "wps":
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, False)
+            flag_changed = True
 
         # 1. 懒加载视图 (第一次切换到该模式时才创建)
         if mode_name not in self.views:
@@ -50,12 +74,45 @@ class MainWindow(QMainWindow):
             current_view = self.views[mode_name]
             self.stack.setCurrentWidget(current_view)
 
-            # 触发视图的 on_show 生命周期 (如果有定义)
             if hasattr(current_view, "on_show"):
                 current_view.on_show()
 
-        # 3. 更新窗口外观 (标题、图标、边框)
+        # 3. 更新窗口外观 (这里只负责改标题和图标，不再碰 WindowFlag！)
         self._update_window_style(mode_name)
+
+        # ==========================================
+        # [关键修复]：如果边框改变了，或者这是程序刚启动的第一次加载，必须调用 show()！
+        # ==========================================
+        if flag_changed or old_mode is None:
+            self.show()
+
+            if flag_changed:
+                # 【第一重锚定】：显示后立刻把窗口锁死在刚才的绝对位置
+                self.move(current_pos)
+
+            # 只有从 WPS 切回来(恢复边框)时，才需要撑大窗口对抗系统挤压
+            if old_mode == "wps" and mode_name != "wps":
+
+                def restore_size():
+                    target_w = 900
+                    target_h = 600
+                    if getattr(self, "_saved_size", None):
+                        target_w = self._saved_size.width()
+                        target_h = self._saved_size.height()
+
+                    # 尺寸抖动，打破 Qt 缓存骗局
+                    # 先给宽高各加 1 个像素，强制逼迫底层布局管理器进行重算
+                    self.resize(target_w , target_h + 1)
+                    # 然后瞬间恢复为目标大小，界面完美铺满！
+                    self.resize(target_w, target_h)
+
+                    # 【第二重锚定】：尺寸抖动完后，再次强行把窗口按回原位，防止系统异步偏移！
+                    self.move(current_pos)
+
+                # 延迟 100ms 确保 Windows 系统已经把标题栏彻底画出来了
+                QTimer.singleShot(100, restore_size)
+
+        self.current_mode = mode_name
 
     @property
     def current_view(self):
@@ -91,7 +148,7 @@ class MainWindow(QMainWindow):
             except:
                 pass
 
-        # 设置边框特性 (WPS 模式通常无边框)
+        # # 设置边框特性 (WPS 模式通常无边框)
         if mode == "wps":
             self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         else:

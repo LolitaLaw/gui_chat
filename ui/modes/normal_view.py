@@ -2,10 +2,10 @@
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, 
                              QLineEdit, QPushButton, QLabel, QFrame, 
                              QMenu, QListWidgetItem, QInputDialog, QMessageBox,
-                             QStackedWidget, QAbstractItemView, QTextEdit)
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
+                             QStackedWidget, QAbstractItemView, QTextEdit, QSplitter)
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QFont, QColor
-from .base_view import BaseModeView
+from ui.modes.base_view import BaseModeView
 from config.settings import THEMES, COLOR_SCHEMES
 from ui.components.chat_delegate import ChatDelegate
 # [新增] 引入联系人代理
@@ -19,6 +19,7 @@ class NormalView(BaseModeView):
     contact_deleted = pyqtSignal(object)
     contact_modified = pyqtSignal(object, str)
     theme_toggled = pyqtSignal()
+    contact_unselected = pyqtSignal()# 取消选中信号
 
     def __init__(self, parent=None, is_dark=True):
         self.is_dark = is_dark
@@ -27,16 +28,53 @@ class NormalView(BaseModeView):
         self._all_contacts_cache = []
         super().__init__(parent)
 
+    # === [核心修复：生命周期钩子] ===
+    def on_show(self):
+        # 延迟足够久，确保窗口边框变化（frameless->framed）的几何更新已完成
+        QTimer.singleShot(100, self._force_layout_update)
+
+    # def resizeEvent(self, event):
+    #     """窗口/父容器大小变化时（包括模式切换导致的frame变化），强制重置splitter比例"""
+    #     super().resizeEvent(event)
+    #     # 仅在聊天页可见时重算，避免无意义的计算
+    #     if hasattr(self, 'chat_splitter') and self.right_stack.currentIndex() == 1:
+    #         self.chat_splitter.setSizes([7000, 3000])
+
+    def _force_layout_update(self):
+        # """强制重置分割器的安全比例"""
+        # # 1. 恢复左右比例
+        # total_width = self.width()
+        # if total_width > 0:
+        #     self.main_splitter.setSizes([280, total_width - 280])
+        
+        # # 2. 恢复上下比例
+        # # [核心优化] 获取整个窗口的高度来估算，而不是依赖还没渲染好的子控件
+        # total_height = self.height() - 50 # 减去 50px 的头部标题高度
+        
+        # if total_height > 100:
+        #     # 强制按 7:3 比例分配：历史记录 70%，输入框 30%
+        #     self.chat_splitter.setSizes([int(total_height * 0.7), int(total_height * 0.3)])
+        self.main_splitter.setSizes([280, 9999]) # 让右侧占满剩余空间，避免过度挤压左侧
+        self.chat_splitter.setSizes([7000, 3000])# 7:3 的比例，数值可以大一些，关键是保持比例关系
+    # ================================
+
     def init_ui(self):
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # [核心优化1] 全局左右布局使用 QSplitter，自适应窗口宽度
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setHandleWidth(1) # 分割线仅 1px 宽
+        self.main_splitter.setChildrenCollapsible(False) # 禁止完全折叠，保持最小宽度生效
+        
         # === 左侧侧边栏 ===
         self.sidebar = QWidget()
-        self.sidebar.setFixedWidth(280)
+        self.sidebar.setMinimumWidth(240) # 最小不低于 240px
+        self.sidebar.setMaximumWidth(380) # 最大不超过 380px
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(0)
         
         # 搜索与工具栏
         search_area = QWidget()
@@ -63,25 +101,36 @@ class NormalView(BaseModeView):
         search_layout.addWidget(self.mode_btn)
         sidebar_layout.addWidget(search_area)
 
-        # 2. 联系人列表
+        # 联系人列表
         self.contact_list_widget = QListWidget()
         self.contact_list_widget.setFrameShape(QFrame.Shape.NoFrame)
         self.contact_list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.contact_list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.contact_list_widget.itemClicked.connect(self._on_contact_clicked)
+        # [新增] 监听双击事件，实现返回空状态
+        self.contact_list_widget.itemDoubleClicked.connect(self._on_back_clicked)
         
         # [核心] 安装联系人绘图代理
         self.contact_delegate = ContactDelegate(self.contact_list_widget, self.current_theme)
         self.contact_list_widget.setItemDelegate(self.contact_delegate)
         # 设置行间距，让背景块之间有空隙 (如果 Delegate 画了圆角背景)
         self.contact_list_widget.setSpacing(2) 
+        
         sidebar_layout.addWidget(self.contact_list_widget)
 
-        main_layout.addWidget(self.sidebar)
+        self.main_splitter.addWidget(self.sidebar)
 
         # === 右侧区域 ===
         self.right_stack = QStackedWidget()
-        main_layout.addWidget(self.right_stack)
+        self.right_stack.setMinimumWidth(400) # 防止右侧被过度挤压
+        self.main_splitter.addWidget(self.right_stack)
+        
+        # 左右比例: 初始化时让左侧保持基本大小，右侧占据大头并承担主要缩放
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setSizes([280, 600])
+
+        main_layout.addWidget(self.main_splitter)
 
         # --- Page 0: 空状态(背景页) ---
         self.empty_page = QWidget()
@@ -98,43 +147,60 @@ class NormalView(BaseModeView):
         chat_layout = QVBoxLayout(self.chat_page)
         chat_layout.setContentsMargins(0, 0, 0, 0)
         chat_layout.setSpacing(0)
+        # 标题
+        # [新增] 包含返回按钮的头部布局
+        self.header_widget = QWidget()
+        self.header_widget.setFixedHeight(50)
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(15, 0, 15, 0)
+        header_layout.setSpacing(10)
 
-        # 1. 标题
+        self.btn_back = QPushButton("⬅️")
+        self.btn_back.setFixedSize(26, 26)
+        self.btn_back.setToolTip("返回空状态")
+        self.btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_back.clicked.connect(self._on_back_clicked)
+
         self.header_label = QLabel("")
-        self.header_label.setFixedHeight(50)
+        self.header_label.setFixedHeight(50)# 设置标题高度，保持与 header_widget 一致
         self.header_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        self.header_label.setIndent(20)
+        self.header_label.setIndent(20)# 设置文本缩进，避免与返回按钮重叠
         # 加粗标题
         font_header = QFont(THEMES["normal"]["font_main"][0], 12)
         font_header.setBold(True)
         self.header_label.setFont(font_header)
-        chat_layout.addWidget(self.header_label)
+        
+        header_layout.addWidget(self.btn_back)
+        header_layout.addWidget(self.header_label)
+        header_layout.addStretch()
+
+        chat_layout.addWidget(self.header_widget)
         
         self.line1 = QFrame()
         self.line1.setFrameShape(QFrame.Shape.HLine)
         self.line1.setFixedHeight(1)
         chat_layout.addWidget(self.line1)
 
-        # 2. [核心替换] 消息记录使用 QListWidget 而不是 QTextEdit
+        # [核心优化2] 垂直 QSplitter 让记录与输入框高度自适应，再也不会出现显示不全
+        self.chat_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.chat_splitter.setHandleWidth(1) # 中间这根线作为代替 line2 的分割线
+        self.chat_splitter.setChildrenCollapsible(False) # 禁止完全折叠，保持最小高度生效        
+        # 聊天记录列表
         self.history_list = QListWidget()
         self.history_list.setFrameShape(QFrame.Shape.NoFrame)
         self.history_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.history_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.history_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.history_list.setMinimumHeight(200) # [修复点] 确保聊天区至少有 200px 高
+        
         # 安装绘图代理
         self.chat_delegate = ChatDelegate(self.history_list, self.current_theme)
         self.history_list.setItemDelegate(self.chat_delegate)
-        
-        chat_layout.addWidget(self.history_list)
-
-        self.line2 = QFrame()
-        self.line2.setFrameShape(QFrame.Shape.HLine)
-        self.line2.setFixedHeight(1)
-        chat_layout.addWidget(self.line2)
+        self.chat_splitter.addWidget(self.history_list)
 
         # 3. 输入区容器 (圆角矩形风格)
         input_container = QWidget()
-        input_container.setFixedHeight(160)
+        input_container.setMinimumHeight(130) # 输入区最小保证130px高
         input_layout = QVBoxLayout(input_container)
         input_layout.setContentsMargins(20, 15, 20, 15)
         
@@ -195,8 +261,15 @@ class NormalView(BaseModeView):
         wrapper_layout.addLayout(btn_bar)
 
         input_layout.addWidget(self.input_wrapper)
-        chat_layout.addWidget(input_container)
+        self.chat_splitter.addWidget(input_container)
+        
+        # [比例设置] 聊天记录高度占比大，输入框占比小
+        self.chat_splitter.setStretchFactor(0, 7)
+        self.chat_splitter.setStretchFactor(1, 3)
+        self.chat_splitter.setSizes([400, 160]) # 初始化高比
 
+        chat_layout.addWidget(self.chat_splitter)
+        
         self.right_stack.addWidget(self.chat_page)
 
         # 默认显示空状态
@@ -225,6 +298,20 @@ class NormalView(BaseModeView):
         self.sidebar.setStyleSheet(f"background-color: {theme['bg_sidebar']};")
         self.header_label.setStyleSheet(f"color: {theme['fg_primary']}; font-weight: bold;")
         
+        # [新增] 返回按钮样式
+        self.btn_back.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {theme['fg_primary']};
+                border: 1px solid {theme['border']};
+                border-radius: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {theme['bg_hover']};
+            }}
+        """)
+
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {theme['bg_input']}; 
@@ -263,7 +350,11 @@ class NormalView(BaseModeView):
 
         # 分割线
         self.line1.setStyleSheet(f"background-color: {theme['border']};")
-        self.line2.setStyleSheet(f"background-color: {theme['border']};")
+        
+        # [核心UI] QSplitter 缝隙自动变成优雅的分割线
+        splitter_style = f"QSplitter::handle {{ background-color: {theme['border']}; }}"
+        self.main_splitter.setStyleSheet(splitter_style)
+        self.chat_splitter.setStyleSheet(splitter_style)
         
         self.input_wrapper.setStyleSheet(f"#InputWrapper {{ background-color: {theme['bg_input']}; border: 1px solid {theme['border']}; border-radius: 10px; }}")
         self.msg_input.setStyleSheet(f"background-color: transparent; border: none; color: {theme['fg_primary']};")
@@ -286,6 +377,12 @@ class NormalView(BaseModeView):
         self.contact_list_widget.verticalScrollBar().setStyleSheet(scrollbar_style)
         self.msg_input.verticalScrollBar().setStyleSheet(scrollbar_style)
 
+    # === [新增] 返回 / 取消选中逻辑 ===
+    def _on_back_clicked(self, item=None):
+        """点击返回按钮 或 双击联系人列表 触发"""
+        self.right_stack.setCurrentIndex(0)       # 切回空页面
+        self.contact_list_widget.clearSelection() # 清除列表的蓝条高亮
+        self.contact_unselected.emit()            # 通知 Controller
     # === [优化] 气泡显示 ===
     def append_message(self, message):
         item = QListWidgetItem()
@@ -307,9 +404,13 @@ class NormalView(BaseModeView):
         self.history_list.scrollToBottom()
 
     def display_history(self, records, name):
+        self.right_stack.setCurrentIndex(1)  # 确保切到聊天页
+        self.header_label.setText(name)      # 确保标题正确
         self.history_list.clear()
         for msg in records:
             self.append_message(msg)
+        # [核心修复] 同样在恢复历史记录时，延迟 50ms 强制重置比例
+        QTimer.singleShot(10, self._force_layout_update)
 
     # ... 保持原有的逻辑方法 (_on_contact_clicked, _on_delete_contact, _do_send 等) 不变 ...
     # 为节省篇幅，请保留您之前已有的这些交互逻辑代码
@@ -321,6 +422,8 @@ class NormalView(BaseModeView):
         self.right_stack.setCurrentIndex(1)
 
         self.contact_selected.emit(contact_data)
+        # [核心修复] 从空状态切到聊天界面后，延迟 50ms 强制重置一次上下比例
+        QTimer.singleShot(10, self._force_layout_update)
 
     def _on_delete_contact(self, contact):
         reply = QMessageBox.question(
